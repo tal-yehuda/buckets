@@ -1,216 +1,140 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc.h>
 
+// You can choose the number of buckets - don't forget to specify capacity.
 #define buckets_number 2
-#define c_list Start, Fill, Empty, Pour,
+
+const int capacity[buckets_number] = {3, 5};
 
 typedef enum {
-    c_list
+    Start, Fill, Empty, Pour,
 } command;
-
-const int buckets[buckets_number] = {5, 3};
-
-void print_nodes(void);
-
-typedef struct {
-    command c;
-    int target;
-    int source;
-} action;
-
 
 struct Node {
     int parent_index;
     int level;
-    int buckets_state[buckets_number];
-    action action;
+    int bucket_state[buckets_number];
+    int target;
+    int source;
+    command action;
 };
 
 struct Node *nodes = NULL;
+int len = 0;
+int cap = 0;
 
-
-int node_cursor = 0;
-int max = 0;
-
-int add(struct Node node);
-
-int uniq_state(struct Node node);
-
-int add(struct Node node) {
-    if (!uniq_state(node)) {
-        return 0;
-    }
-    if (max == 0) {
-
-        max = 10;
-        nodes = (struct Node *) malloc(max * sizeof(struct Node));
-    } else if (node_cursor == max) {
-        max *= 2;
-        struct Node *temp = (struct Node *) realloc(nodes, max * sizeof(struct Node));
-        if (temp == NULL) {
-            fprintf(stderr, "reallocation failed\n");
-            exit(1);
-        }
+void add(struct Node node) {
+    if (len == cap) {
+        cap = (cap + 1) * 2;
+        struct Node *temp = (struct Node *) realloc(nodes, cap * sizeof(struct Node));
+        if (temp == NULL) exit(1);
         nodes = temp;
     }
-
-    nodes[node_cursor++] = node;
-    return 1;
+    nodes[len++] = node;
 }
 
-int uniq_state(struct Node node) {
-    int ok = 1;
-    struct Node t;
-    for (int i = 0; i < node_cursor; i++) {
-        ok = 0;
-        for (int j = 0; j < buckets_number; j++) {
-            t = nodes[i];
-            action a = t.action;
-            action na = node.action;
-            if (t.buckets_state[j] != node.buckets_state[j]
-                || (a.c != na.c && a.target != na.target && a.source != na.source)
-                    ) {
-                ok = 1;
-            }
-        }
-        if (ok == 0) {
-            break;
-        }
-    }
-    return ok;
+struct Node fill(struct Node node, int target) {
+    node.action = Fill;
+    node.target = target;
+    node.source = 0;
+    node.bucket_state[target] = capacity[target];
+    return node;
 }
 
-struct Node get(int index);
-
-struct Node get(int index) {
-    if (index < node_cursor)
-        return nodes[index];
-    fprintf(stderr, "index out of bound\n");
-    exit(1);
+struct Node empty(struct Node node, int target) {
+    node.action = Empty;
+    node.target = target;
+    node.source = 0;
+    node.bucket_state[target] = 0;
+    return node;
 }
 
-struct Node run(struct Node node);
+struct Node pour(struct Node node, int target, int source) {
+    node.action = Pour;
+    node.target = target;
+    node.source = source;
 
-struct Node run(struct Node node) {
-    switch (node.action.c) {
-        case Start:
-            break;
-        case Fill:
-            node.buckets_state[node.action.target] = buckets[node.action.target];
-            break;
-        case Empty:
-            node.buckets_state[node.action.target] = 0;
-            break;
-        case Pour: {
-            int *src = &node.buckets_state[node.action.source];
-            int *trg = &node.buckets_state[node.action.target];
-            int left = buckets[node.action.target] - *trg;
-            if (*src >= left) {
-                *src -= left;
-                *trg += left;
-            } else {
-                *trg += *src;
-                *src -= *src;
-            }
-        }
-            break;
+    int source_state = node.bucket_state[source];
+    int target_state = node.bucket_state[target];
+    int left = capacity[target] - target_state;
+
+    if (source_state >= left) {
+        node.bucket_state[source] -= left;
+        node.bucket_state[target] += left;
+    } else {
+        node.bucket_state[target] += source_state;
+        node.bucket_state[source] -= source_state;
     }
     return node;
 }
 
-int step(struct Node node, int node_index);
+void fill_step(struct Node node) {
+    for (int i = 0; i < buckets_number; i++) {
+        if (node.bucket_state[i] == capacity[i]) continue;
+        add(fill(node, i));
+    }
+}
 
-int step(struct Node node, int node_index) {
-    // signal that a new level was found
-    int ok = 0;
-    int temp_ok;
+void empty_step(struct Node node) {
+    for (int i = 0; i < buckets_number; i++) {
+        if (node.bucket_state[i] == 0) continue;
+        add(empty(node, i));
+    }
+}
 
-    // next level and parent index
+void pour_step(struct Node node) {
+    for (int s = 0; s < buckets_number; s++) {
+        for (int t = 0; t < buckets_number; t++) {
+            if (s == t || node.bucket_state[s] == 0 || node.bucket_state[t] == capacity[t]) continue;
+            add(pour(node, t, s));
+        }
+    }
+}
+
+void step(int i) {
+    struct Node node = nodes[i];
+    node.parent_index = i;
     node.level += 1;
-    node.parent_index = node_index;
 
-    // Fill all the buckets that are not full
-    node.action.c = Fill;
-    for (int i = 0; i < buckets_number; i++) {
-        if (node.buckets_state[i] == buckets[i]) {
-            continue;
-        }
-        node.action.target = i;
-        temp_ok = add(run(node));
-        if (temp_ok == 1) {
-            ok = 1;
-        }
-    }
-
-    // Empty all the buckets that are not empty
-    node.action.c = Empty;
-    for (int i = 0; i < buckets_number; i++) {
-        if (node.buckets_state[i] == 0) {
-            continue;
-        }
-        node.action.target = i;
-        temp_ok = add(run(node));
-        if (temp_ok == 1) {
-            ok = 1;
-        }
-    }
-
-    // Pour all the buckets that are not empty to the buckets that are not full
-    node.action.c = Pour;
-    for (int i = 0; i < buckets_number; i++) {
-        for (int j = 0; j < buckets_number; j++) {
-            if (i == j || node.buckets_state[i] == 0 || node.buckets_state[j] == buckets[j]) {
-                continue;
-            }
-            node.action.source = i;
-            node.action.target = j;
-            temp_ok = add(run(node));
-            if (temp_ok == 1) {
-                ok = 1;
-            }
-        }
-    }
-    return ok;
+    fill_step(node);
+    empty_step(node);
+    pour_step(node);
 }
 
-int search(struct Node node) {
-    int current_level = node.level;
-    // should continue search (are there more levels to explore)?
-    int ok = 1;
-    while (ok) {
-        ok = 0;
-        int r = node_cursor;
-        for (int i = 0; i < r; i++) {
-            struct Node n = get(i);
-            if (n.level != current_level) continue;
-            int temp_ok = step(n, i);
-            if (temp_ok) {
-                ok = 1;
-            }
-
-        }
-        current_level += 1;
-        if (current_level > 10000) break;
-    }
-    return current_level;
+int same_buckets(struct Node n, struct Node m) {
+    for (int i = 0; i < buckets_number; i++)
+        if (n.bucket_state[i] != m.bucket_state[i]) return 0;
+    return 1;
 }
 
-void print_nodes(void) {
-    struct Node n;
-    for (int i = 0; i < node_cursor; i++) {
-        n = nodes[i];
-//        if (n.action.c != Pour) continue;
-        printf("a: %d  l: %d  i: %d  s: [", n.action.c, n.level, n.parent_index);
-        for (int j = 0; j < buckets_number; j++) {
-            printf("%d,", n.buckets_state[j]);
-        }
-        printf("]\t");
+int is_new(int i) {
+    for (int j = 0; j < i; j++) {
+        struct Node a = nodes[i];
+        struct Node b = nodes[j];
+        if (same_buckets(a, b) && a.action == b.action && a.target == b.target && a.source == b.source)
+            return 0;
     }
-    printf("\n");
+    return 1;
 }
 
-void print_action(int a) {
+int run_level(int level) {
+    int run = 0;
+    for (int i = 0; i < len; i++) {
+        if (nodes[i].level == level && is_new(i)) {
+            step(i);
+            run += 1;
+        }
+    }
+    return run;
+}
+
+void search(void) {
+    int level = 0;
+    while (run_level(level)) level += 1;
+}
+
+
+void print_action(command a) {
     switch (a) {
         case Start:
             printf("Start");
@@ -224,82 +148,77 @@ void print_action(int a) {
         case Pour:
             printf("Pour");
             break;
-        default:
-            fprintf(stderr, "No %d action found", a);
-            exit(1);
     }
 }
 
-//void print_path_to_state(struct Node n) {
-//    struct Node t;
-//    for (int i = 0; i < node_cursor; i++) {
-//        t = get(i);
-//        int ok = 0;
-//        for (int j = 0; j < buckets_number; j++) {
-//            if (n.buckets_state[j] != t.buckets_state[j]) {
-//                ok = 1;
-//            }
-//        }
-//        ok = !ok;
-//        while (ok) {
-//            printf("[%d,%d] ", t.buckets_state[0], t.buckets_state[1]);
-//            print_action(t.action.c);
-//            if (t.action.c == Start) ok = 0;
-//            printf(" <- ");
-//            t = get(t.parent_index);
-//        }
-//    }
-//    putchar('\n');
-//}
-
-void print_path_to_bucket(int l) {
-    struct Node t;
-    for (int i = 0; i < node_cursor; i++) {
-        t = get(i);
-        int ok = 0;
-        for (int j = 0; j < buckets_number; j++) {
-            if (t.buckets_state[j] == l) {
-                ok = 1;
-            }
-        }
-
-        if (t.action.c != Pour) continue;
-
-        while (ok) {
-            printf("[");
-            for (int j = 0; j < buckets_number; j++) printf("%d,", t.buckets_state[j]);
-            printf("] ");
-            print_action(t.action.c);
-            if (t.action.c == Start) {
-                putchar('\n');
-                break;
-            }
-            printf(" <- ");
-            t = get(t.parent_index);
-            for (int j = 0; j < buckets_number; j++) {
-                if (t.buckets_state[j] == l) {
-                    printf(" XXX \n");
-                    ok = 0;
-                }
-            }
-        }
-    }
-}
-
-int main(void) {
-    struct Node n = {
-            .level = 0,
-            .action = {
-                    .c = Start,
-            },
-    };
-    for (int i = 0; i < buckets_number; i++) n.buckets_state[i] = 0;
-    add(n);
-    printf("%d \n", search(n)-1);
-    print_nodes();
-    print_path_to_bucket(4);
-    printf("%d\n", node_cursor);
+int check_buckets(struct Node node, int w) {
+    for (int n = 0; n < buckets_number; n++)
+        if (node.bucket_state[n] == w) return 1;
     return 0;
 }
 
+void print_buckets(struct Node node) {
+    printf("[ ");
+    for (int n = 0; n < buckets_number; n++) printf("%d ", node.bucket_state[n]);
+    printf("]");
+}
 
+void print_node(struct Node node) {
+    print_buckets(node);
+    putchar('-');
+    print_action(node.action);
+    putchar('-');
+    printf("(%d %d)", node.target, node.source);
+}
+
+int highest(int i, int w) {
+    while (nodes[i].action != Start) {
+        i = nodes[i].parent_index;
+        if (check_buckets(nodes[i], w)) return 0;
+    }
+    return 1;
+}
+
+void print_path(int i){
+    while (nodes[i].action != Start) {
+        print_node(nodes[i]);
+        printf(" <- ");
+        i = nodes[i].parent_index;
+    }
+    print_node(nodes[i]);
+}
+
+void print_path_to_bucket(int w) {
+    for (int i = 0; i < len; i++) {
+        struct Node node = nodes[i];
+        if (check_buckets(node, w) && highest(i, w)) {
+            print_path(i);
+            putchar('\n');
+        }
+    }
+}
+
+void print_nodes(void) {
+    for (int i = 0; i < len; i++) {
+        print_node(nodes[i]);
+        putchar('\n');
+    }
+}
+
+// You can seed an initial state of buckets.
+void seed(void) {
+    struct Node n = {
+            .bucket_state = {0, 0},
+            .action = Start,
+    };
+    add(n);
+}
+
+
+int main(void) {
+    seed();
+    search();
+    print_path_to_bucket(4);
+    print_nodes();
+    return 0;
+}
